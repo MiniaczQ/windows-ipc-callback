@@ -1,19 +1,23 @@
 mod lib;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 use lib::event::CrossProcessAsyncEvent;
 
 fn main() {
     // Atomic boolean for communication between the system callback call and our process.
-    let shared = AtomicBool::new(false);
+    let shared1 = Arc::new(AtomicBool::new(false));
+    let shared2 = shared1.clone();
     // Create out primitive
     let mut event =
         CrossProcessAsyncEvent::try_create("some-random-event").expect("Failed to create event.");
     // Callback captures the atomic boolean
-    let callback = || {
+    let callback = move || {
         println!("Hello from callback!");
-        shared.store(true, Ordering::Relaxed);
+        shared2.store(true, Ordering::Relaxed);
     };
 
     let registered = event.register_callback(callback);
@@ -23,10 +27,10 @@ fn main() {
     while counter < 3 {
         println!("Waiting for waker.");
         // I used a busy loop for testing, this is where an `await` call would be made
-        while !shared.load(Ordering::Relaxed) {
+        while !shared1.load(Ordering::Relaxed) {
             std::hint::spin_loop()
         }
-        shared.store(false, Ordering::Relaxed);
+        shared1.store(false, Ordering::Relaxed);
         counter += 1;
         println!("Received {} wakes.", counter);
     }

@@ -18,8 +18,8 @@ use windows::{
 pub struct CrossProcessAsyncEvent {
     /// Windows handle to the `Event`.
     handle: HANDLE,
-    /// Windows handle to the `WaitObject`; no idea why I kept it.
-    wait_handle: Option<HANDLE>,
+    /// Callback for cleanup
+    callback: Option<Arc<Box<dyn Fn()>>>,
 }
 
 impl CrossProcessAsyncEvent {
@@ -37,7 +37,7 @@ impl CrossProcessAsyncEvent {
             ManuallyDrop::into_inner(hstring);
             Ok(Self {
                 handle,
-                wait_handle: None,
+                callback: None,
             })
         }
     }
@@ -53,7 +53,7 @@ impl CrossProcessAsyncEvent {
             ManuallyDrop::into_inner(hstring);
             Ok(Self {
                 handle,
-                wait_handle: None,
+                callback: None,
             })
         }
     }
@@ -77,7 +77,10 @@ impl CrossProcessAsyncEvent {
     /// Callback registration (separate because I'm lazy).
     ///
     /// It'd be much safer to work with generics (for the intermediate `*c_void` representation) and provide callback (or thread-safe data) during creation.
-    pub fn register_callback(&mut self, callback: impl Fn()) -> bool {
+    pub fn register_callback<T>(&mut self, callback: T) -> bool
+    where
+        T: Fn() + 'static,
+    {
         // Handle to a `WaitObject`, not sure what WE need it for, but it's required by the windows function call.
         let mut wait_handle = HANDLE::default();
         // Callback function is wrapped in `Arc<Box<_>>` before casting into `*const c_void`
@@ -85,6 +88,7 @@ impl CrossProcessAsyncEvent {
         // - Trait objects cannot be turned into pointers so we use `Box<Fn()>`
         // - `Box<Fn()>` has address of `0x1` so we use another layer `Arc<Box<Fn()>>`
         let callback: Arc<Box<dyn Fn()>> = Arc::new(Box::new(callback));
+        self.callback = Some(callback.clone());
         // We leak memory here, this never gets cleaned up
         let callback_ptr = Arc::into_raw(callback) as *const c_void;
         // This also leaks memory, windows requires us to remove callbacks
@@ -99,9 +103,7 @@ impl CrossProcessAsyncEvent {
             )
         }
         .as_bool();
-        if res {
-            self.wait_handle = Some(wait_handle);
-        }
+
         res
     }
 }
