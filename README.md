@@ -4,7 +4,7 @@ To achieve true async we need the ability to remotely call a procedure on anothe
 
 The point of this experiment was to fabricate a basis for this on Windows platform.
 
-# How to run :man-running:
+# How to run :running:
 
 To try the example yourself run:
 
@@ -14,7 +14,7 @@ To try the example yourself run:
 
 The intended behavior is for `sleeper` to print a console message for each `waker` ran.
 
-The `sleeper` will terminate after 10 prints.
+The `sleeper` ~~will~~ should terminate after few prints. (Currently terminates immediatelly, probably need to unset the `Event`)
 
 # Other
 
