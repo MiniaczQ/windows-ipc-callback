@@ -70,7 +70,7 @@ impl CrossProcessAsyncEvent {
     ///
     /// Boolean parameter is ignored, because we aren't using timeouts.
     unsafe extern "system" fn callback_wrapper(callback_ptr: *mut c_void, _: BOOLEAN) {
-        // Reverse casting from `*mut c_void`
+        // Reverse casting from `*mut c_void`, which we were forced to use by `RegisterWaitForSingleObject`
         callback_ptr.cast::<&dyn Fn()>().read()();
     }
 
@@ -82,13 +82,11 @@ impl CrossProcessAsyncEvent {
         let mut wait_handle = HANDLE::default();
         // Callback function is wrapped in `Arc<Box<_>>` before casting into `*const c_void`
         // The reasons for that are the following:
-        // - Trait objects cannot be turned into pointers -> `Box<Fn()>`
-        // - `Box<Fn()>` has address of `0x1` -> `Box<Box<Fn()>>`
-        // - `Box<Box<Fn()>>` still broken so we switch to `Arc` -> `Arc<Box<Fn()>>`
-        // - `Arc<Box<Fn()>>` works for some reason, needs investigation
+        // - Trait objects cannot be turned into pointers so we use `Box<Fn()>`
+        // - `Box<Fn()>` has address of `0x1` so we use another layer `Arc<Box<Fn()>>`
         let callback: Arc<Box<dyn Fn()>> = Arc::new(Box::new(callback));
         // We leak memory here, this never gets cleaned up
-        let callback_ptr: *const c_void = Arc::into_raw(callback) as *const c_void;
+        let callback_ptr = Arc::into_raw(callback) as *const c_void;
         // This also leaks memory, windows requires us to remove callbacks
         let res = unsafe {
             RegisterWaitForSingleObject(
