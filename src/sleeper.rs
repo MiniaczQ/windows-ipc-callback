@@ -12,7 +12,7 @@ fn main() {
         CrossProcessAsyncEvent::try_create("some-random-event").expect("Failed to create event.");
     // Callback captures the atomic boolean
     let callback = || {
-        println!("Yoo!");
+        println!("Hello from callback!");
         shared.store(true, Ordering::Relaxed);
     };
 
@@ -26,6 +26,7 @@ fn main() {
         while !shared.load(Ordering::Relaxed) {
             std::hint::spin_loop()
         }
+        shared.store(false, Ordering::Relaxed);
         counter += 1;
         println!("Received {} wakes.", counter);
     }
