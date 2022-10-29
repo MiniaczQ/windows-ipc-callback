@@ -7,7 +7,7 @@ use std::{
 use windows::{
     core::{Error as WinError, HSTRING, PCWSTR},
     Win32::{
-        Foundation::{BOOLEAN, HANDLE},
+        Foundation::{GetLastError, BOOLEAN, ERROR_ALREADY_EXISTS, HANDLE},
         System::Threading::{
             CreateEventW, OpenEventW, RegisterWaitForSingleObject, SetEvent, EVENT_ALL_ACCESS,
             WT_EXECUTEDEFAULT,
@@ -26,12 +26,14 @@ impl CrossProcessAsyncEvent {
     /// Attempts to create a new windows `Event`.
     ///
     /// Also succeeds when `Event` already existed (technically throws an error, but succeeds at the same time).
-    /// Check `Return` description of `CreateEventW` for details.
     pub fn try_create(name: impl AsRef<OsStr>) -> Result<Self, WinError> {
         unsafe {
             let hstring = ManuallyDrop::new(HSTRING::from(name.as_ref()));
             let pcwstr = PCWSTR(hstring.as_wide().as_ptr());
             let handle = CreateEventW(None, false, false, pcwstr)?;
+            if GetLastError() == ERROR_ALREADY_EXISTS {
+                println!("Event already existed, opening it instead.");
+            }
             ManuallyDrop::into_inner(hstring);
             Ok(Self {
                 handle,
@@ -68,12 +70,8 @@ impl CrossProcessAsyncEvent {
     ///
     /// Boolean parameter is ignored, because we aren't using timeouts.
     unsafe extern "system" fn callback_wrapper(callback_ptr: *mut c_void, _: BOOLEAN) {
-        // Reverse casting from `*mut c_void`, which we were forced to use by `RegisterWaitForSingleObject`
-        let callback: Arc<Box<dyn Fn()>> = Arc::from_raw(callback_ptr.cast());
-        callback();
-        // This prevents double free.
-        // So that we can call this callback multiple times.
-        forget(callback);
+        // Reverse casting from `*mut c_void`
+        callback_ptr.cast::<&dyn Fn()>().read()();
     }
 
     /// Callback registration (separate because I'm lazy).
@@ -87,7 +85,7 @@ impl CrossProcessAsyncEvent {
         // - Trait objects cannot be turned into pointers -> `Box<Fn()>`
         // - `Box<Fn()>` has address of `0x1` -> `Box<Box<Fn()>>`
         // - `Box<Box<Fn()>>` still broken so we switch to `Arc` -> `Arc<Box<Fn()>>`
-        // - `Arc<Box<Fn()>>` works for some reason, could use investigation
+        // - `Arc<Box<Fn()>>` works for some reason, needs investigation
         let callback: Arc<Box<dyn Fn()>> = Arc::new(Box::new(callback));
         // We leak memory here, this never gets cleaned up
         let callback_ptr: *const c_void = Arc::into_raw(callback) as *const c_void;
