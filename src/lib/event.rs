@@ -1,6 +1,6 @@
 use std::{
     ffi::{c_void, OsStr},
-    mem::{forget, ManuallyDrop},
+    mem::ManuallyDrop,
     sync::Arc,
 };
 
@@ -9,8 +9,8 @@ use windows::{
     Win32::{
         Foundation::{GetLastError, BOOLEAN, ERROR_ALREADY_EXISTS, HANDLE},
         System::Threading::{
-            CreateEventW, OpenEventW, RegisterWaitForSingleObject, SetEvent, EVENT_ALL_ACCESS,
-            WT_EXECUTEDEFAULT,
+            CreateEventW, OpenEventW, RegisterWaitForSingleObject, SetEvent, UnregisterWait,
+            EVENT_ALL_ACCESS, WT_EXECUTEDEFAULT,
         },
     },
 };
@@ -19,7 +19,7 @@ pub struct CrossProcessAsyncEvent {
     /// Windows handle to the `Event`.
     handle: HANDLE,
     /// Callback for cleanup
-    callback: Option<Arc<Box<dyn Fn()>>>,
+    callback: Option<(Arc<Box<dyn Fn()>>, HANDLE)>,
 }
 
 impl CrossProcessAsyncEvent {
@@ -81,18 +81,15 @@ impl CrossProcessAsyncEvent {
     where
         T: Fn() + 'static,
     {
-        // Handle to a `WaitObject`, not sure what WE need it for, but it's required by the windows function call.
+        // Handle to the registered callback, we need to remember it to clean it up later
         let mut wait_handle = HANDLE::default();
         // Callback function is wrapped in `Arc<Box<_>>` before casting into `*const c_void`
         // The reasons for that are the following:
         // - Trait objects cannot be turned into pointers so we use `Box<Fn()>`
         // - `Box<Fn()>` has address of `0x1` so we use another layer `Arc<Box<Fn()>>`
         let callback: Arc<Box<dyn Fn()>> = Arc::new(Box::new(callback));
-        self.callback = Some(callback.clone());
-        // We leak memory here, this never gets cleaned up
-        let callback_ptr = Arc::into_raw(callback) as *const c_void;
-        // This also leaks memory, windows requires us to remove callbacks
-        let res = unsafe {
+        let callback_ptr = Arc::into_raw(callback.clone()) as *const c_void;
+        let result = unsafe {
             RegisterWaitForSingleObject(
                 &mut wait_handle as *mut HANDLE,
                 self.handle,
@@ -103,7 +100,22 @@ impl CrossProcessAsyncEvent {
             )
         }
         .as_bool();
+        if result {
+            self.callback = Some((callback, wait_handle));
+        }
+        result
+    }
+}
 
-        res
+impl Drop for CrossProcessAsyncEvent {
+    fn drop(&mut self) {
+        // Remove callback if one was registered.
+        if let Some((_, wait_handle)) = self.callback {
+            unsafe {
+                if !UnregisterWait(wait_handle).as_bool() {
+                    panic!("Failed to unregister wait callback.");
+                }
+            }
+        }
     }
 }

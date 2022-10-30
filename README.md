@@ -4,6 +4,11 @@ To achieve true async we need the ability to remotely call a procedure on anothe
 
 The point of this experiment was to fabricate a basis for this on Windows platform.
 
+Update:
+
+After carefuly reading the rest of the documentation, it came to my attention that Windows uses a blocking thread pool for this functionality...
+But the project is still a neat example of low level Rust.
+
 # How to run :running:
 
 To try the example yourself run:
